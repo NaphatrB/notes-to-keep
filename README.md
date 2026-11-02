@@ -25,15 +25,15 @@ a time, and **Google Keep has no import feature**.
 
 ```mermaid
 flowchart TD
-    A[Apple Notes / iCloud Notes] --> C[Apple Notes Exporter<br/>JSON (tested)]
-    C --> E[(Export folder)]
-    E --> F[import_notes_to_keep.py]
-    F --> G[Fix titles, folder labels, dates<br/>split notes over 19,999 chars]
-    G --> H[gkeepapi]
-    H --> I[(Google Keep)]
-    H -.->|HTTP 429| J[drip-guard.sh<br/>adaptive batches]
+    A["Apple Notes / iCloud Notes"] --> C["Apple Notes Exporter<br/>JSON (tested)"]
+    C --> E["Export folder"]
+    E --> F["import_notes_to_keep.py"]
+    F --> G["Fix titles, folder labels, dates<br/>split notes over 19,999 chars"]
+    G --> H["gkeepapi"]
+    H --> I["Google Keep"]
+    H -.->|"HTTP 429"| J["drip-guard.sh<br/>adaptive batches"]
     J -.-> H
-    F --> K[(.keep-import-state.json<br/>resume ledger)]
+    F --> K[".keep-import-state.json<br/>resume ledger"]
 ```
 
 Tested path: macOS + Apple Notes Exporter JSON. Apple also documents an iCloud
