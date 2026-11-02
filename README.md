@@ -55,6 +55,8 @@ What this repository was actually exercised against:
 - macOS 12.7.6 (Intel), Apple Notes Exporter with a **JSON** export.
 - One Google account, `gkeepapi` 0.17.1, Python 3.14.10.
 - The adaptive drip guard against Google's HTTP 429 rate limit.
+- `get-token.py` end to end with `--email` and `--cookie-file`, using a cookie
+  copied by hand from the browser. The interactive prompt was not exercised.
 
 **Not tested here:** Apple's privacy.apple.com export, non-macOS systems, and
 the TXT/Markdown/HTML readers against a real export (those readers were only
@@ -155,15 +157,30 @@ python3.12 -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 3. Get a Keep master token
+### 3. Exchange the browser cookie for a Keep master token
+
+**The browser step is manual.** `get-token.py` does not open a browser or sign
+you in; it only exchanges a cookie you copied, verifies it against Keep, and
+stores the token.
+
+1. Open <https://accounts.google.com/EmbeddedSetup>, sign in, click **I agree**,
+   and wait for the spinner. That navigation is where `oauth_token` is set.
+2. Copy the `oauth_token` cookie (starts with `oauth2_4/`) from DevTools →
+   Application/Storage → Cookies → `accounts.google.com`. It is HttpOnly, so
+   `document.cookie` will not show it.
+3. Exchange it immediately — it is single-use:
 
 ```sh
-python scripts/get-token.py
+printf '%s' 'oauth2_4/PASTE' > ~/oauth-cookie.txt
+chmod 600 ~/oauth-cookie.txt
+python scripts/get-token.py --email you@gmail.com --cookie-file ~/oauth-cookie.txt
+rm ~/oauth-cookie.txt
 ```
 
-It asks for the Google account and the `oauth_token` cookie from
-`accounts.google.com/EmbeddedSetup`, verifies the token against Keep, and stores
-it in `~/.config/keep/token` (mode 600). The token grants full access to the
+This is the tested path: `--email` plus `--cookie-file`, with the cookie
+copied by hand (the example uses a temporary file). The browser step was
+manual in testing; the interactive prompt was not exercised. The script
+stores the resulting token in `~/.config/keep/token` (mode 600). The token grants full access to the
 account — read [Security](#security).
 
 ### 4. Dry run, test, then import

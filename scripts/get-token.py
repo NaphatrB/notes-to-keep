@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Exchange a Google oauth_token cookie for a Keep master token.
 
-Run this once per account. It stores the token in ~/.config/keep/token
-(mode 600) so run-import.sh can use it without prompting.
+This does NOT open a browser or sign you in. Open
+https://accounts.google.com/EmbeddedSetup in a browser, sign in, click
+"I agree", then copy the oauth_token cookie (starts with oauth2_4/) from
+DevTools -> Application/Storage -> Cookies -> accounts.google.com.
 
-The oauth_token is single-use and short-lived: get it from the browser and
-run this immediately.
+The cookie is single-use and short-lived: exchange it immediately. The
+resulting master token is stored in ~/.config/keep/token (mode 600).
 """
 
 from __future__ import annotations
