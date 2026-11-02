@@ -28,7 +28,7 @@ So every working migration is: **Apple → files → unofficial Keep client
 | Manual copy/paste, or Docs → right-click → **Save to Keep** | no | manual | high | Fine for a handful of notes. Keep's Docs/Slides side panel is the only "import-ish" feature Google ships. |
 | [adamyi/notes_to_keep](https://github.com/adamyi/notes_to_keep) | yes | **no** | medium | 2018 proof of concept. Alpha quality, text only, and its password login no longer works. Read it as a reference, not a tool to run as-is. |
 
-## Runbook for this case: Monterey, ~3,500 text-only notes
+## Runbook: Monterey, several thousand text-only notes
 
 Text-only is the best case: no attachment workaround, no handwriting loss.
 Expect the export to take minutes and the Keep import to take roughly 45–120
@@ -80,12 +80,12 @@ Notes specific to this size:
   characters plus `…`, while the body keeps the full first line. The importer
   promotes that full line to the Keep title before removing the duplicate body
   line; without that step the tail of the line is silently lost (it affected
-  1,282 of 3,253 notes in this library).
+  about 40% of the notes in one large library).
 - **Dates.** Keep stamps every imported note with the import time. To keep the
   original date searchable, import with `--keep-dates`: with a JSON export it
   reads the `created` field; with TXT it needs `--add-date-prefix` at export
   time and strips `YYYY-MM-DD ` from the title. Without it, dates are lost.
-- **Archive option.** 3,500 cards is a lot of wall. `--archive` imports
+- **Archive option.** Several thousand cards is a lot of wall. `--archive` imports
   everything already archived; you can also archive old years in the Keep UI
   later (select multiple notes → archive).
 - **Verify before deleting.** The ledger prints `Created N note(s)`. Re-run the
