@@ -25,11 +25,8 @@ a time, and **Google Keep has no import feature**.
 
 ```mermaid
 flowchart TD
-    A[Apple Notes / iCloud Notes] --> B{Export}
-    B -->|macOS app| C[Apple Notes Exporter<br/>JSON or TXT]
-    B -->|No Mac| D[privacy.apple.com<br/>iCloud Notes ZIP]
+    A[Apple Notes / iCloud Notes] --> C[Apple Notes Exporter<br/>JSON (tested)]
     C --> E[(Export folder)]
-    D --> E
     E --> F[import_notes_to_keep.py]
     F --> G[Fix titles, folder labels, dates<br/>split notes over 19,999 chars]
     G --> H[gkeepapi]
@@ -39,8 +36,11 @@ flowchart TD
     F --> K[(.keep-import-state.json<br/>resume ledger)]
 ```
 
-1. **Export** — Apple Notes Exporter on macOS, or Apple's Data & Privacy portal
-   if you don't have a Mac.
+Tested path: macOS + Apple Notes Exporter JSON. Apple also documents an iCloud
+Notes export at privacy.apple.com, but this project has not tested it (see
+[Tested scope](#tested-scope)).
+
+1. **Export** — Apple Notes Exporter on macOS (the tested path).
 2. **Transform** — the importer fixes Apple's truncated titles, removes the
    duplicated title line, maps folders to labels, keeps dates, and splits
    oversized notes.
@@ -48,8 +48,21 @@ flowchart TD
 4. **Adapt** — when Google returns 429, the drip guard backs off and resumes
    automatically, ramping the batch size up again after idle periods.
 
+## Tested scope
+
+What this repository was actually exercised against:
+
+- macOS 12.7.6 (Intel), Apple Notes Exporter with a **JSON** export.
+- One Google account, `gkeepapi` 0.17.1, Python 3.14.10.
+- The adaptive drip guard against Google's HTTP 429 rate limit.
+
+**Not tested here:** Apple's privacy.apple.com export, non-macOS systems, and
+the TXT/Markdown/HTML readers against a real export (those readers were only
+exercised with fixtures). Treat those paths as unverified.
+
 ## Contents
 
+- [Tested scope](#tested-scope)
 - [Using an agent](#using-an-agent)
 - [Quick start](#quick-start)
 - [Importer behaviour](#importer-behaviour)
@@ -76,8 +89,8 @@ Work step by step and show me the output of each check.
 1. Environment
    - Confirm macOS version, Python >= 3.10, and available disk space.
    - Ask me for the export directory (default ~/notes-export) and confirm the
-     exporter (Apple Notes Exporter or the privacy.apple.com download) has
-     finished: no exporter process running and the file count stable.
+     export has finished: no exporter process running and the file count
+     stable. The tested path is Apple Notes Exporter JSON.
    - Check for invalid JSON, zero-byte files, and notes over 19,999 characters.
 
 2. Setup
@@ -128,8 +141,11 @@ notes-export export --output ~/notes-export --format json --account iCloud
 ```
 
 JSON is preferred: it carries the exact title, plain-text body, creation date
-and folder. TXT works too; titles then come from filenames. Without a Mac, use
-the iCloud Notes export from [privacy.apple.com](https://privacy.apple.com).
+and folder. TXT is also supported; titles then come from filenames, but the TXT
+reader was only exercised with fixtures. This project was tested end to end
+with the Apple Notes Exporter JSON output. Apple documents an iCloud
+Notes export at [privacy.apple.com](https://privacy.apple.com), but that path
+is untested here.
 
 ### 2. Install the Python environment
 
@@ -202,15 +218,20 @@ minutes on a zero run, and caps runs per day.
 | Attachments via API | not supported |
 | Import | none |
 
-The private API refills at roughly **100 notes per 5 minutes**, with a larger
-burst available on a long-idle account. The drip guard is built around that.
+The character limit was exercised by splitting oversized notes on the account
+tested. The label cap and attachment behaviour are from Google's documentation.
+
+On the one account tested, the private API refilled at roughly **100 notes per
+5 minutes**, with a larger burst available on the first run against a long-idle
+account. The drip guard is built around that observed behaviour.
 
 ## FAQ
 
 ### Can I bulk import Apple Notes into Google Keep?
 
-Not with either vendor's tools. This project exports Apple Notes to JSON/TXT and
-creates the notes in Keep through `gkeepapi`, with a resumable ledger.
+Not with either vendor's tools. This project exports Apple Notes to JSON
+(tested) or TXT and creates the notes in Keep through `gkeepapi`, with a
+resumable ledger.
 
 ### Does Google Keep have an import feature?
 
@@ -220,9 +241,10 @@ delegation) and cannot upload attachments or set labels.
 
 ### How do I export iCloud Notes in bulk?
 
-On macOS, use Apple Notes Exporter (JSON or TXT). Without a Mac, request the
-iCloud Notes copy from [privacy.apple.com](https://privacy.apple.com); it arrives
-as `.txt` files in your folder tree plus attachment files, usually within days.
+On macOS we used Apple Notes Exporter with JSON output — the path this project
+was tested with. Apple also documents an iCloud Notes copy at
+[privacy.apple.com](https://privacy.apple.com); this project has not tested that
+export or its folder layout.
 
 ### Why did the import stop, or return HTTP 429?
 
@@ -232,9 +254,11 @@ adaptive batches instead of hammering the endpoint.
 
 ### Do images, checklists, and formatting transfer?
 
-Text only. The API cannot upload attachments; image/PDF filenames are listed in
-the note body. Checklists become `[ ]` / `[x]` lines. Formatting and handwriting
-are not preserved — export those notes as PDF first if they matter.
+The library tested here was text-only, so images, checklists and handwriting
+were not exercised. The API creates text notes: it cannot upload attachments, so
+image/PDF filenames are listed at the end of the note. Checklist-looking text is
+kept as lines (`[ ]` / `[x]`) rather than converted to a Keep list. If
+formatting or handwriting matters, export those notes as PDF first.
 
 ### Is it safe to use my Google account?
 
@@ -244,14 +268,15 @@ Google password afterwards to revoke it.
 
 ### Does it work without a Mac?
 
-Yes for the import step. Only the bulk export (Apple Notes Exporter) needs
-macOS; the privacy.apple.com export and the importer run anywhere with Python.
+Unverified. The import step is plain Python and reads files, but this project
+was only run on macOS 12.7.6 and did not use the privacy.apple.com export.
+Treat Linux/Windows as untested.
 
 ### How long does a 3,000-note migration take?
 
-Export takes minutes. The import is limited by Google's refill rate: roughly
-100 notes every 5 minutes, so a few hours of machine uptime, spread across
-sessions if the machine sleeps.
+On the account tested, export took minutes and the import was limited to
+roughly 100 notes per 5 minutes, so a few thousand notes needed hours of
+machine uptime spread across sessions. Your account's refill rate may differ.
 
 ## Security
 

@@ -1,8 +1,10 @@
 # Bulk migrating Apple / iCloud Notes to Google Keep
 
-Researched 2026-11-02. Short version: **there is no official path in either
-direction**. Apple exports one note at a time from the app; Google Keep has no
-import feature at all. A bulk migration means "export to files, then push the
+Researched 2026-11-02. **Tested in this project:** macOS 12.7.6 + Apple Notes
+Exporter JSON only. The privacy.apple.com export was not exercised.
+
+Short version: **there is no official path in either direction**. Apple exports
+one note at a time from the app; Google Keep has no import feature at all. A bulk migration means "export to files, then push the
 files into Keep with an unofficial client". Text survives; images, formatting,
 checklists and dates do not survive cleanly.
 
@@ -19,11 +21,14 @@ So every working migration is: **Apple → files → unofficial Keep client
 
 ## Option comparison
 
+Only **Apple Notes Exporter** was used in this project; the other rows are from
+documentation or third-party reports, not tested here.
+
 | Approach | Bulk? | Attachments | Effort | Notes |
 |---|---|---|---|---|
 | [Apple Notes Exporter](https://github.com/kzaremski/apple-notes-exporter) (free, GPLv3, macOS 11+) | yes | yes, beside each note | low | Reads the local Notes database, keeps folder tree, 15+ formats incl. Markdown/HTML/JSON, CLI + Shortcuts + MCP. Best export tool. Does **not** cover Gmail/Yahoo/Outlook note accounts (move those to iCloud/On My Mac first). |
 | [Exporter](https://apps.apple.com/app/exporter/id1099120373) (free, App Store, Chintan Ghate) | yes | yes | low | Markdown/HTML, preserves folders and note dates. Reviewers report hours for ~3,000 notes and occasional charset failures. |
-| [Apple Data & Privacy](https://privacy.apple.com) iCloud Notes export | yes | yes (separate files) | low, but slow | Official. Plain `.txt` in your folder tree + attachments; includes Recently Deleted. Takes up to 7 days (typically ~2–5). Formatting **and handwriting** are lost. |
+| [Apple Data & Privacy](https://privacy.apple.com) iCloud Notes export | yes | yes (separate files) | low, but slow | Documented by Apple; **not tested here**. Plain `.txt` in your folder tree + attachments; includes Recently Deleted. Takes up to 7 days (typically ~2–5). Formatting **and handwriting** are lost. |
 | [notes-exporter](https://github.com/storizzi/notes-exporter) (AppleScript + Python) | yes | yes, inline | medium | Good when you want Markdown/PDF/DOCX with images inline. Needs Automation permissions. |
 | Manual copy/paste, or Docs → right-click → **Save to Keep** | no | manual | high | Fine for a handful of notes. Keep's Docs/Slides side panel is the only "import-ish" feature Google ships. |
 | [adamyi/notes_to_keep](https://github.com/adamyi/notes_to_keep) | yes | **no** | medium | 2018 proof of concept. Alpha quality, text only, and its password login no longer works. Read it as a reference, not a tool to run as-is. |
@@ -140,15 +145,16 @@ Use **Apple Notes Exporter** (GUI or CLI). It preserves the folder tree and
 writes attachments next to each note:
 
 ```sh
-# GUI: pick iCloud → format Markdown or HTML → folder output
-# CLI (inside the app bundle):
-notes-export export --output ~/notes-export --format markdown --account iCloud
+# GUI: pick iCloud → JSON → folder output
+# CLI (inside the app bundle), the tested path:
+notes-export export --output ~/notes-export --format json --account iCloud
 ```
 
-Fallback if you cannot install software: request **iCloud Notes** at
+Documented but **untested here**: request **iCloud Notes** at
 [privacy.apple.com](https://privacy.apple.com) → *Request a copy of your data*.
-You get `.txt` files organised by folder plus attachment files. Expect days,
-not minutes.
+Apple says you get `.txt` files organised by folder plus attachment files, and
+that it can take days. We did not run this path, so treat the format and layout
+as unverified.
 
 Either way you end up with something like:
 
@@ -159,13 +165,14 @@ notes-export/
   iCloud/Notes/Personal/Recipe.txt
 ```
 
-### No Mac?
+### No Mac? (untested)
 
-Skip step 1's exporter. The **privacy.apple.com** route is pure browser and
-works from Linux/Windows, so the whole pipeline (export → this script) runs
-without a Mac. `icloud.com/notes` itself has no bulk selection or export — it is
-copy-paste only. Every third-party bulk exporter is macOS-only because it reads
-the local Notes database.
+We did not test this path. Apple documents an iCloud Notes copy at
+[privacy.apple.com](https://privacy.apple.com); the importer reads `.txt`, so it
+should work, but the export format and folder layout were not exercised here.
+`icloud.com/notes` itself has no bulk selection or export — it is copy-paste
+only. The bulk exporters listed above run on macOS because they read the local
+Notes database.
 
 ### 2. Sanity-check the export
 
