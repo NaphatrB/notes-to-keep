@@ -98,6 +98,67 @@ The guard estimates how much quota has refilled since the last success, asks for
 that many notes (50–400), grows a cap on success, halves it and backs off 15
 minutes on a zero run, and caps runs per day.
 
+## Using an agent
+
+The migration is mostly mechanical but has sharp edges: a single-use token, a
+resumable ledger, and a private API that rate-limits. If you want a coding
+agent to drive it, paste this prompt into an agent with shell access to this
+checkout. It works with any agent; it is written to ask before doing anything
+destructive.
+
+```text
+Help me migrate my Apple Notes to Google Keep using this repository.
+
+First read README.md and research/apple-notes-to-google-keep.md, then inspect
+the scripts in scripts/. Follow them rather than inventing a new importer.
+Work step by step and show me the output of each check.
+
+1. Environment
+   - Confirm macOS version, Python >= 3.10, and available disk space.
+   - Ask me for the export directory (default ~/notes-export) and confirm the
+     exporter (Apple Notes Exporter or the privacy.apple.com download) has
+     finished: no exporter process running and the file count stable.
+   - Check for invalid JSON, zero-byte files, and notes over 19,999 characters.
+
+2. Setup
+   - Create a virtualenv and install requirements.txt.
+   - If the default python3 is older than 3.10, find a newer interpreter and
+     tell me which one you used.
+
+3. Token
+   - Walk me through scripts/get-token.py and the EmbeddedSetup cookie step.
+   - I will paste the oauth_token cookie and the master token myself. Never ask
+     me to paste a master token into chat, never print it, never write it into
+     this repository, and never commit it.
+   - If the exchange fails with BadAuthentication, explain that the cookie is
+     single-use and ask me for a fresh one; do not loop.
+
+4. Import
+   - Run the dry run and show me: fragments, labels, duplicates removed,
+     pending count, and any skipped notes.
+   - Ask before importing more than 100 notes.
+   - Run a 20-note test first, then either the full import or
+     scripts/install-agent.sh for drip mode.
+   - On repeated 429s, stop and use the drip guard; do not hammer the API.
+
+5. Safety
+   - Never delete, trash or edit my Apple Notes.
+   - Never empty Google Keep's trash or reset the ledger without my explicit
+     confirmation.
+   - Never commit credentials, tokens, cookies, note content, usernames,
+     absolute paths, logs or state files. Keep the pre-commit hook enabled.
+   - Do not push to a remote unless I ask.
+
+6. Verification
+   - After the run, reconcile the ledger against Keep (imported vs pending) and
+     spot-check a few notes: title, body, labels, dates.
+   - Report what remains, expected wait time under the rate limit, and the
+     exact command to resume.
+```
+
+If the agent supports repository instructions, put the same text in `AGENTS.md`
+or your tool's project-instructions file so it is picked up automatically.
+
 ## Importer behaviour
 
 - Inputs: `.json` (Apple Notes Exporter), `.txt`, `.md`, `.html`.
