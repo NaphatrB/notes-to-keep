@@ -1,102 +1,62 @@
-# notes-to-keep
+# Apple Notes to Google Keep migration (bulk, iCloud, macOS)
 
-Bulk migration of Apple Notes / iCloud Notes to Google Keep.
+**Bulk-migrate Apple Notes / iCloud Notes to Google Keep** — with a resumable
+Python importer, a real export pipeline, and a scheduler that survives Google's
+undocumented rate limits. Neither vendor offers this: Apple exports one note at
+a time, and **Google Keep has no import feature**.
 
-The two vendors don't provide a usable path — Apple exports one note at a time,
-and Keep has no import at all — so this project does the missing parts: a
-repeatable export pipeline, a resumable importer, and a scheduler that survives
-Google's undocumented rate limits.
+<p>
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-blue">
+  <img alt="Platform macOS" src="https://img.shields.io/badge/platform-macOS-lightgrey">
+  <img alt="Destination Google Keep" src="https://img.shields.io/badge/destination-Google%20Keep-yellow">
+  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-green">
+</p>
 
-Project home: <https://github.com/NaphatrB/notes-to-keep>
+> **TL;DR — let a coding agent drive it.**
+> Point an agent at this checkout and paste the prompt in
+> [Using an agent](#using-an-agent). It checks your export, sets up Python,
+> walks you through the one-time Google token, runs a dry run and a 20-note
+> test, then imports the rest within Google's rate limits.
+>
+> You only do three things: **export your notes**, **sign in to Google once**,
+> and **approve the test batch**.
 
-## What it does
+## How it works
 
-- Reads an Apple Notes export (JSON from Apple Notes Exporter, or the `.txt`
-  export from Apple's Data & Privacy portal).
-- Creates notes in Google Keep through `gkeepapi` (the private mobile API).
-- Keeps a ledger so runs are resumable and never duplicate.
-- Works around the awkward parts: truncated titles, duplicated title lines,
-  folder → label mapping, dates, oversized notes, attachments, and the Keep
-  label/character limits.
-- Schedules itself in small bursts when the account is rate limited, ramping up
-  automatically after idle periods.
-
-## Repository layout
-
-```
-research/apple-notes-to-google-keep.md   research, options, runbook, sources
-scripts/import_notes_to_keep.py          the importer
-scripts/get-token.py                     oauth_token -> Keep master token
-scripts/run-import.sh                    wrapper with the recommended flags
-scripts/drip-guard.sh                    adaptive rate-limit scheduler
-scripts/install-agent.sh                 installs the launchd agent (local paths)
-```
-
-Scripts use `~/` and `$HOME`; the agent is generated at install time, so the
-repository contains no usernames or absolute home paths.
-
-## Requirements
-
-- macOS for the export step (Apple Notes Exporter runs there), Linux/Windows is
-  fine for the importer once you have the files.
-- Python 3.10+ (`gkeepapi` requires it).
-- [Apple Notes Exporter](https://github.com/kzaremski/apple-notes-exporter)
-  (external, GPL-3.0) for a bulk JSON/TXT export, or Apple's Data & Privacy
-  portal.
-
-## Quick start
-
-### 1. Export
-
-```sh
-notes-export export --output ~/notes-export --format json --account iCloud
+```mermaid
+flowchart TD
+    A[Apple Notes / iCloud Notes] --> B{Export}
+    B -->|macOS app| C[Apple Notes Exporter<br/>JSON or TXT]
+    B -->|No Mac| D[privacy.apple.com<br/>iCloud Notes ZIP]
+    C --> E[(Export folder)]
+    D --> E
+    E --> F[import_notes_to_keep.py]
+    F --> G[Fix titles, folder labels, dates<br/>split notes over 19,999 chars]
+    G --> H[gkeepapi]
+    H --> I[(Google Keep)]
+    H -.->|HTTP 429| J[drip-guard.sh<br/>adaptive batches]
+    J -.-> H
+    F --> K[(.keep-import-state.json<br/>resume ledger)]
 ```
 
-JSON is preferred: it carries the exact title, plain-text body, creation date
-and folder. TXT works too; titles then come from filenames.
+1. **Export** — Apple Notes Exporter on macOS, or Apple's Data & Privacy portal
+   if you don't have a Mac.
+2. **Transform** — the importer fixes Apple's truncated titles, removes the
+   duplicated title line, maps folders to labels, keeps dates, and splits
+   oversized notes.
+3. **Import** — `gkeepapi` creates the notes through the private Keep API.
+4. **Adapt** — when Google returns 429, the drip guard backs off and resumes
+   automatically, ramping the batch size up again after idle periods.
 
-### 2. Install the Python environment
+## Contents
 
-```sh
-python3.12 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. Get a Keep master token
-
-```sh
-python scripts/get-token.py
-```
-
-It asks for the Google account and the `oauth_token` cookie from
-`accounts.google.com/EmbeddedSetup`, verifies the token against Keep, and stores
-it in `~/.config/keep/token` (mode 600).
-
-The token grants full access to the account. Read the security section.
-
-### 4. Dry run, test, then import
-
-```sh
-python scripts/import_notes_to_keep.py ~/notes-export --dry-run --label-depth 1 --keep-dates
-python scripts/import_notes_to_keep.py ~/notes-export --label-depth 1 --keep-dates --limit 20
-python scripts/import_notes_to_keep.py ~/notes-export --label-depth 1 --keep-dates
-```
-
-### 5. Large libraries: drip mode
-
-The private Keep API rate-limits writes. `run-import.sh` uses safe batching, and
-`install-agent.sh` installs a launchd agent that runs it in short bursts while
-the machine is on:
-
-```sh
-scripts/run-import.sh          # one manual run
-scripts/install-agent.sh       # daily-budgeted, adaptive background runs
-```
-
-The guard estimates how much quota has refilled since the last success, asks for
-that many notes (50–400), grows a cap on success, halves it and backs off 15
-minutes on a zero run, and caps runs per day.
+- [Using an agent](#using-an-agent)
+- [Quick start](#quick-start)
+- [Importer behaviour](#importer-behaviour)
+- [Limits and rate limits](#limits-and-rate-limits)
+- [FAQ](#faq)
+- [Security](#security)
+- [Attribution](#attribution)
 
 ## Using an agent
 
@@ -159,6 +119,60 @@ Work step by step and show me the output of each check.
 If the agent supports repository instructions, put the same text in `AGENTS.md`
 or your tool's project-instructions file so it is picked up automatically.
 
+## Quick start
+
+### 1. Export
+
+```sh
+notes-export export --output ~/notes-export --format json --account iCloud
+```
+
+JSON is preferred: it carries the exact title, plain-text body, creation date
+and folder. TXT works too; titles then come from filenames. Without a Mac, use
+the iCloud Notes export from [privacy.apple.com](https://privacy.apple.com).
+
+### 2. Install the Python environment
+
+```sh
+python3.12 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 3. Get a Keep master token
+
+```sh
+python scripts/get-token.py
+```
+
+It asks for the Google account and the `oauth_token` cookie from
+`accounts.google.com/EmbeddedSetup`, verifies the token against Keep, and stores
+it in `~/.config/keep/token` (mode 600). The token grants full access to the
+account — read [Security](#security).
+
+### 4. Dry run, test, then import
+
+```sh
+python scripts/import_notes_to_keep.py ~/notes-export --dry-run --label-depth 1 --keep-dates
+python scripts/import_notes_to_keep.py ~/notes-export --label-depth 1 --keep-dates --limit 20
+python scripts/import_notes_to_keep.py ~/notes-export --label-depth 1 --keep-dates
+```
+
+### 5. Large libraries: drip mode
+
+The private Keep API rate-limits writes. `run-import.sh` uses safe batching, and
+`install-agent.sh` installs a launchd agent that runs it in short bursts while
+the machine is on:
+
+```sh
+scripts/run-import.sh          # one manual run
+scripts/install-agent.sh       # adaptive background runs with a daily budget
+```
+
+The guard estimates how much quota has refilled since the last success, asks for
+that many notes (50–400), grows a cap on success, halves it and backs off 15
+minutes on a zero run, and caps runs per day.
+
 ## Importer behaviour
 
 - Inputs: `.json` (Apple Notes Exporter), `.txt`, `.md`, `.html`.
@@ -179,22 +193,69 @@ or your tool's project-instructions file so it is picked up automatically.
 - `--escape-hashtags` prevents `#tag` from becoming a Keep label.
 - Timeouts on auth and sync abort stalled 429 backoff instead of hanging.
 
-## Limits worth knowing
+## Limits and rate limits
 
-| Keep limit | Value |
+| Google Keep limit | Value |
 |---|---|
 | Characters per note | 19,999 (title 1,000) |
 | Labels | 50, flat |
 | Attachments via API | not supported |
 | Import | none |
 
-Observed private-API refill: about **100 notes per 5 minutes**, with a much
-larger burst available on a long-idle account. The drip guard is built around
-that.
+The private API refills at roughly **100 notes per 5 minutes**, with a larger
+burst available on a long-idle account. The drip guard is built around that.
+
+## FAQ
+
+### Can I bulk import Apple Notes into Google Keep?
+
+Not with either vendor's tools. This project exports Apple Notes to JSON/TXT and
+creates the notes in Keep through `gkeepapi`, with a resumable ledger.
+
+### Does Google Keep have an import feature?
+
+No. Keep only exports (via Google Takeout); there is no import menu and no
+consumer API. The official Keep API is enterprise-only (Workspace + domain-wide
+delegation) and cannot upload attachments or set labels.
+
+### How do I export iCloud Notes in bulk?
+
+On macOS, use Apple Notes Exporter (JSON or TXT). Without a Mac, request the
+iCloud Notes copy from [privacy.apple.com](https://privacy.apple.com); it arrives
+as `.txt` files in your folder tree plus attachment files, usually within days.
+
+### Why did the import stop, or return HTTP 429?
+
+Google rate-limits the private Keep API per account. `gkeepapi` retries 429
+forever by default; this project aborts the run and the drip guard resumes in
+adaptive batches instead of hammering the endpoint.
+
+### Do images, checklists, and formatting transfer?
+
+Text only. The API cannot upload attachments; image/PDF filenames are listed in
+the note body. Checklists become `[ ]` / `[x]` lines. Formatting and handwriting
+are not preserved — export those notes as PDF first if they matter.
+
+### Is it safe to use my Google account?
+
+The master token grants full account access; it is stored locally with mode 600
+and never committed. Use a dedicated account if you prefer, and change the
+Google password afterwards to revoke it.
+
+### Does it work without a Mac?
+
+Yes for the import step. Only the bulk export (Apple Notes Exporter) needs
+macOS; the privacy.apple.com export and the importer run anywhere with Python.
+
+### How long does a 3,000-note migration take?
+
+Export takes minutes. The import is limited by Google's refill rate: roughly
+100 notes every 5 minutes, so a few hours of machine uptime, spread across
+sessions if the machine sleeps.
 
 ## Security
 
-- The master token is account-wide. Keep it off disk when you are done
+- The master token is account-wide. Remove it when done
   (`rm ~/.config/keep/token`), and change the Google password if it leaks.
 - This repository never contains credentials, tokens, cookies, note content,
   usernames, or absolute home paths.
