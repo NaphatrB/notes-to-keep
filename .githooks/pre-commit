@@ -1,0 +1,38 @@
+#!/bin/sh
+# Block credentials, personal paths and migration state from being committed.
+# Enable with: git config core.hooksPath .githooks
+set -eu
+
+files=$(mktemp)
+bad=$(mktemp)
+trap 'rm -f "$files" "$bad"' EXIT
+
+git diff --cached --name-only --diff-filter=ACM | grep -v '^\.githooks/' > "$files" || true
+[ -s "$files" ] || exit 0
+
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+
+    case "$f" in
+        token|*/token|cookie|*/cookie|cookies.txt|*/cookies.txt)
+            echo "$f" >> "$bad" ;;
+        .env|.env.*|*/.env|*/.env.*)
+            echo "$f" >> "$bad" ;;
+        *.pem|*.key|*.p12|*.mobileprovision|*id_rsa*|*id_ed25519*)
+            echo "$f" >> "$bad" ;;
+        *.log|.keep-import-state.json*|.drip-state|.drip-backoff)
+            echo "$f" >> "$bad" ;;
+    esac
+
+    [ -f "$f" ] || continue
+    if grep -IlE 'oauth2_4/[A-Za-z0-9_-]{8,}|aas_et/[A-Za-z0-9_-]{8,}|BEGIN [A-Z ]*PRIVATE KEY|KEEP_MASTER_TOKEN=[^$[:space:]]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/' "$f" >/dev/null 2>&1; then
+        echo "$f" >> "$bad"
+    fi
+done < "$files"
+
+if [ -s "$bad" ]; then
+    echo "pre-commit: blocked credential, personal path, or state file:" >&2
+    sort -u "$bad" >&2
+    echo "Use ~ or \$HOME; keep tokens, state and logs out of the repo." >&2
+    exit 1
+fi

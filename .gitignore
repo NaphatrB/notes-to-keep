@@ -1,0 +1,41 @@
+# Credentials and local state — never commit these.
+
+# Google master token, oauth cookies, key material
+.config/
+.env
+.env.*
+token
+cookie
+cookies.txt
+*.token
+*.pem
+*.key
+*.p12
+*.mobileprovision
+id_rsa*
+id_ed25519*
+
+# Migration state and logs
+.keep-import-state.json
+.keep-import-state.json.*
+.drip-state
+.drip-backoff
+drip.log
+import*.log
+*.log
+
+# Exported notes are personal data, not source
+notes-export/
+apple-notes-export/
+export/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# macOS
+.DS_Store
