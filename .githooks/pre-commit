@@ -20,7 +20,7 @@ while IFS= read -r f; do
             echo "$f" >> "$bad" ;;
         *.pem|*.key|*.p12|*.mobileprovision|*id_rsa*|*id_ed25519*)
             echo "$f" >> "$bad" ;;
-        *.log|.keep-import-state.json*|.drip-state|.drip-backoff)
+        *.log|.keep-import-state.json*|.keep-sync-state.json*|*.sync-state.json*|.drip-state|.drip-backoff)
             echo "$f" >> "$bad" ;;
     esac
 

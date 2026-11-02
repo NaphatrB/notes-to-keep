@@ -219,8 +219,18 @@ minutes on a zero run, and caps runs per day.
 - **Long notes** are split at Keep's 19,999-character limit, with `(1/2)` titles.
 - **Attachments** cannot be uploaded through the API; their filenames are listed
   at the end of the note.
+- **Verified writes**: a note is only added to the ledger after Keep echoes it
+  back with a server id. A create can report success while the note is never
+  stored; unconfirmed notes are not recorded and the run stops instead.
 - **Ledger**: `.keep-import-state.json` records source path + fragment index, so
   flag changes do not cause duplicates.
+- **`--prune-ledger`** reconciles the ledger with the notes that actually exist
+  in Keep (matched by title and body) and drops entries for anything missing.
+  Use the same flags you imported with.
+- **`--sync-state`** caches `gkeepapi`'s cursor in `.keep-sync-state.json`, so a
+  re-run fetches only changes instead of re-reading the whole account. That is
+  much lighter on the rate limit. The file contains note text: it is mode 600,
+  gitignored, and tagged with your account so it is never reused elsewhere.
 - `--skip-empty` drops blank `2001-01-01` phantom records but keeps title-only
   notes.
 - `--escape-hashtags` prevents `#tag` from becoming a Keep label.
@@ -241,6 +251,12 @@ tested. The label cap and attachment behaviour are from Google's documentation.
 On the one account tested, the private API refilled at roughly **100 notes per
 5 minutes**, with a larger burst available on the first run against a long-idle
 account. The drip guard is built around that observed behaviour.
+
+During this migration the ledger recorded more notes than Keep actually held:
+creates returned success, but the notes never appeared. `gkeepapi` cannot tell
+the difference, so the importer now verifies each batch against the server id
+Keep returns and refuses to record unconfirmed notes. Treat "the request
+succeeded" as distinct from "the note exists".
 
 ## FAQ
 
@@ -301,7 +317,9 @@ machine uptime spread across sessions. Your account's refill rate may differ.
   (`rm ~/.config/keep/token`), and change the Google password if it leaks.
 - This repository never contains credentials, tokens, cookies, note content,
   usernames, or absolute home paths.
-- `.gitignore` excludes tokens, state, logs and exports.
+- `.gitignore` excludes tokens, state, logs and exports. That includes
+  `.keep-sync-state.json`, which caches the Keep sync cursor and therefore
+  contains note text; treat it like the export itself.
 - `.githooks/pre-commit` blocks staged credentials, personal paths and state
   files. Enable it with `git config core.hooksPath .githooks`.
 

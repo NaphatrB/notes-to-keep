@@ -211,6 +211,12 @@ Markdown rendering); `--keep-dates` prepends the creation date from the
 filename; `--label-depth 1` keeps the label count under Keep's 50;
 `--archive` imports every note already archived.
 
+A note only enters the ledger once Keep echoes it back with a server id. This
+matters in practice: during this migration the ledger recorded more notes than
+Keep actually held, because creates reported success while the notes were never
+stored. `--prune-ledger` reconciles an existing ledger against what a fresh sync
+can see, dropping entries that have no matching note.
+
 ### 4. Deal with what did not migrate
 
 - **Images / PDFs / scans**: Google Keep has no write API for attachments.

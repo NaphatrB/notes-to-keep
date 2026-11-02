@@ -18,6 +18,9 @@ id_ed25519*
 # Migration state and logs
 .keep-import-state.json
 .keep-import-state.json.*
+.keep-sync-state.json
+.keep-sync-state.json.*
+*.sync-state.json
 .drip-state
 .drip-backoff
 drip.log

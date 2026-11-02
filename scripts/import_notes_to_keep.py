@@ -20,6 +20,11 @@ Notes:
   * Folder names become Keep labels (Keep labels are flat, max 50).
   * Notes longer than Keep's ~20k character limit are split.
   * Re-running is safe: imported files are recorded in a ledger and skipped.
+  * A note is only written to the ledger after Keep echoes it back with a
+    server id. A create can report success while nothing is stored, so
+    "no error" is not proof that the note exists.
+  * --prune-ledger rebuilds the ledger from the notes that actually exist in
+    Keep, which repairs the bookkeeping when a ledger has drifted.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ import signal
 import socket
 import sys
 import time
+from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -315,8 +321,8 @@ def call_with_timeout(func, seconds: float, *args):
         signal.signal(signal.SIGALRM, previous)
 
 
-def sync_with_timeout(keep, seconds: float) -> None:
-    call_with_timeout(keep.sync, seconds)
+def sync_with_timeout(keep, seconds: float, resync: bool = False) -> None:
+    call_with_timeout(keep.sync, seconds, resync)
 
 
 def label_for(keep, name: str, cache: dict):
@@ -331,6 +337,127 @@ def label_for(keep, name: str, cache: dict):
         label = keep.createLabel(name)
     cache[name] = label
     return label
+
+
+ACCOUNT_EMAIL = ""
+
+
+def account_tag(email: str) -> str:
+    """Short, non-reversible tag so a cached state is not reused cross-account."""
+    return hashlib.sha256(email.strip().lower().encode()).hexdigest()[:16]
+
+
+def sync_state_path() -> Path | None:
+    return Path(ARGS.sync_state).expanduser() if ARGS.sync_state else None
+
+
+def load_sync_state(path: Path | None) -> dict | None:
+    if not path or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"warning: ignoring unreadable sync state: {exc}", file=sys.stderr)
+        return None
+    if not isinstance(payload, dict) or "state" not in payload:
+        return None
+    if payload.get("account") != account_tag(ACCOUNT_EMAIL):
+        print("warning: sync state belongs to another account; ignoring it",
+              file=sys.stderr)
+        return None
+    return payload["state"]
+
+
+def save_sync_state(keep, path: Path | None) -> None:
+    """Persist gkeepapi's cursor so the next run only fetches changes.
+
+    The file holds note text, so it is written mode 600 and is gitignored.
+    """
+    if not path:
+        return
+    payload = {"account": account_tag(ACCOUNT_EMAIL), "state": keep.dump()}
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, separators=(",", ":"))
+    except OSError as exc:
+        print(f"warning: could not save sync state: {exc}", file=sys.stderr)
+
+
+def connect():
+    """Authenticate, or raise ImportError / an auth error for the caller."""
+    import gkeepapi  # imported lazily so --dry-run works without it
+
+    global ACCOUNT_EMAIL
+    email = ARGS.email or input("Google account email: ").strip()
+    ACCOUNT_EMAIL = email
+    token = os.environ.get("KEEP_MASTER_TOKEN") or getpass.getpass("Keep master token: ")
+    cache = sync_state_path()
+
+    state = load_sync_state(cache)
+    if state is not None:
+        try:
+            keep = gkeepapi.Keep()
+            call_with_timeout(keep.authenticate, ARGS.sync_timeout,
+                              email, token.strip(), state)
+            print("Resumed the cached Keep cursor; fetching changes only.",
+                  file=sys.stderr)
+            return keep
+        except Exception as exc:  # noqa: BLE001
+            if type(exc).__name__ not in {"ResyncRequiredException",
+                                          "UpgradeRecommendedException",
+                                          "SyncException"}:
+                raise
+            print(f"warning: cached state rejected ({type(exc).__name__}); "
+                  "doing a full sync", file=sys.stderr)
+
+    keep = gkeepapi.Keep()
+    call_with_timeout(keep.authenticate, ARGS.sync_timeout, email, token.strip())
+    return keep
+
+
+def do_sync(keep) -> None:
+    """Sync, falling back to a full resync if the cached cursor is rejected."""
+    try:
+        sync_with_timeout(keep, ARGS.sync_timeout)
+    except Exception as exc:  # noqa: BLE001
+        if type(exc).__name__ != "ResyncRequiredException":
+            raise
+        print("cached Keep cursor was rejected; re-syncing from scratch",
+              file=sys.stderr)
+        sync_with_timeout(keep, ARGS.sync_timeout, resync=True)
+    save_sync_state(keep, sync_state_path())
+
+
+def signature(title: str, text: str) -> tuple[str, str]:
+    """Whitespace-insensitive identity for matching a local note to Keep."""
+    return (" ".join(title.split()), " ".join(text.split()))
+
+
+def prune_ledger(keep, notes: list[dict], ledger: dict, ledger_path: Path) -> tuple[int, int]:
+    """Drop ledger entries whose note is not actually in Keep.
+
+    The ledger is only as trustworthy as the create call: a create can report
+    success while the note is never stored, which leaves the ledger ahead of
+    reality. This rebuilds it from what a fresh sync can see.
+    """
+    server = Counter(signature(n.title or "", n.text or "") for n in keep.all())
+    by_key = {n["key"]: n for n in notes}
+    kept: dict = {}
+    dropped = 0
+    for key, path in ledger.items():
+        item = by_key.get(key)
+        if item is None:  # entry for a file that is no longer in the export
+            dropped += 1
+            continue
+        sig = signature(item["title"], item["text"])
+        if server[sig] > 0:
+            server[sig] -= 1
+            kept[key] = path
+        else:
+            dropped += 1
+    save_ledger(ledger_path, kept)
+    return len(kept), dropped
 
 
 def main() -> int:
@@ -375,41 +502,60 @@ def main() -> int:
             print(f"  ... and {len(pending) - 20} more")
         return 0
 
-    if not pending:
+    if not pending and not ARGS.prune_ledger:
         print("Nothing pending; nothing to do.")
         return 0
 
     try:
-        import gkeepapi  # imported lazily so --dry-run works without it
+        keep = connect()
     except ImportError:
         print("error: pip install gkeepapi", file=sys.stderr)
         return 2
-
-    email = ARGS.email or input("Google account email: ").strip()
-    token = os.environ.get("KEEP_MASTER_TOKEN") or getpass.getpass("Keep master token: ")
-
-    keep = gkeepapi.Keep()
-    try:
-        call_with_timeout(keep.authenticate, ARGS.sync_timeout, email, token.strip())
     except Exception as exc:  # noqa: BLE001 - surface Google's message verbatim
         print(f"error: authentication failed: {exc}", file=sys.stderr)
         if isinstance(exc, SyncTimeout):
             print("Likely a Keep rate limit; try again next run.", file=sys.stderr)
         return 1
+
+    if ARGS.prune_ledger:
+        kept, dropped = prune_ledger(keep, notes, ledger, ledger_path)
+        save_sync_state(keep, sync_state_path())
+        print(f"Reconciled ledger against Keep: kept {kept}, dropped {dropped} "
+              f"(was {len(ledger)})")
+        print(f"Next import would create {len(notes) - kept} note(s).")
+        return 0
+
     print(f"Authenticated at {time.strftime('%H:%M:%S')}; importing {len(pending)} note(s)",
           file=sys.stderr)
 
     cache: dict = {}
     failures = []
     created = 0
-    batch: list[dict] = []
+    confirmed = 0
+    batch: list[tuple[dict, object]] = []
 
-    def commit() -> None:
-        """Record only what the server has actually accepted, then save."""
-        for item in batch:
+    def commit(items) -> None:
+        """Record only the notes Keep confirmed, then save."""
+        for item, _ in items:
             ledger[item["key"]] = item["path"]
-        batch.clear()
         save_ledger(ledger_path, ledger)
+
+    def flush() -> list[dict]:
+        """Commit confirmed notes; return the ones Keep did not echo back."""
+        nonlocal confirmed
+        ok = [(item, node) for item, node in batch if getattr(node, "server_id", None)]
+        missing = [item for item, node in batch if not getattr(node, "server_id", None)]
+        commit(ok)
+        confirmed += len(ok)
+        batch.clear()
+        return missing
+
+    def unconfirmed_error(missing: list[dict]) -> None:
+        print(f"error: Keep accepted the request but did not store {len(missing)} "
+              f"note(s).", file=sys.stderr)
+        print("They were not written to the ledger. This is the silent-drop "
+              "behaviour seen at Google's creation ceiling: stop for a while and "
+              "retry with a smaller --batch-size.", file=sys.stderr)
 
     aborted = False
     for note in pending:
@@ -421,7 +567,7 @@ def main() -> int:
                 label = label_for(keep, note["label"], cache)
                 if label is not None:
                     node.labels.add(label)
-            batch.append(note)
+            batch.append((note, node))
             created += 1
         except KeyboardInterrupt:
             print("\ninterrupted, syncing what we have...")
@@ -434,25 +580,34 @@ def main() -> int:
         if len(batch) >= ARGS.batch_size:
             started = time.time()
             try:
-                sync_with_timeout(keep, ARGS.sync_timeout)
+                do_sync(keep)
             except Exception as exc:  # noqa: BLE001 - stop instead of cascading
                 print(f"error: sync failed, stopping: {exc}", file=sys.stderr)
                 aborted = True
                 break
-            commit()
-            print(f"  {created} note(s) synced at {time.strftime('%H:%M:%S')} "
-                  f"({time.time() - started:.1f}s)", file=sys.stderr)
+            missing = flush()
+            print(f"  {created} note(s) sent, {confirmed} confirmed at "
+                  f"{time.strftime('%H:%M:%S')} ({time.time() - started:.1f}s)",
+                  file=sys.stderr)
+            if missing:
+                unconfirmed_error(missing)
+                aborted = True
+                break
 
     if batch:
         try:
-            sync_with_timeout(keep, ARGS.sync_timeout)
+            do_sync(keep)
         except Exception as exc:  # noqa: BLE001
             print(f"error: final sync failed: {exc}", file=sys.stderr)
             aborted = True
         else:
-            commit()
+            missing = flush()
+            if missing:
+                unconfirmed_error(missing)
+                aborted = True
     save_ledger(ledger_path, ledger)
-    print(f"Created {created} note(s); {len(failures)} failed; ledger: {ledger_path}")
+    print(f"Created {created} note(s), {confirmed} confirmed by Keep; "
+          f"{len(failures)} failed; ledger: {ledger_path}")
     if aborted:
         print("Stopped early. Re-run the same command to continue from here.",
               file=sys.stderr)
@@ -490,6 +645,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--escape-hashtags", action="store_true",
                         help="stop #tags from becoming Keep labels (adds a zero-width space)")
     parser.add_argument("--reimport", action="store_true", help="ignore the ledger")
+    parser.add_argument("--prune-ledger", action="store_true",
+                        help="check the ledger against the notes that actually exist "
+                             "in Keep and drop entries for missing ones; use the same "
+                             "flags you imported with")
+    parser.add_argument("--sync-state", default=".keep-sync-state.json", metavar="PATH",
+                        help="cache gkeepapi's sync cursor here so later runs fetch "
+                             "only changes instead of the whole account; the file "
+                             "contains note text, so keep it private "
+                             "(default .keep-sync-state.json; pass an empty string "
+                             "to disable)")
     parser.add_argument("--state", default=".keep-import-state.json", help="ledger path")
     parser.add_argument("--batch-size", type=int, default=20,
                         help="sync to Keep every N notes (default 20)")
